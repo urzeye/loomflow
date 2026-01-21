@@ -19,6 +19,62 @@
 
 ---
 
+## 💡 设计哲学
+
+### 为什么不是 set/get？
+
+如果你熟悉 [TTL (transmittable-thread-local)](https://github.com/alibaba/transmittable-thread-local)，可能会疑惑：为什么 LoomFlow 需要 `with().run()` 的写法，而不是简单的 `set()`/`get()`？
+
+```java
+// TTL 风格
+TRANSMITTABLE_TL.set("value");
+String v = TRANSMITTABLE_TL.get();
+TRANSMITTABLE_TL.remove();  // ⚠️ 忘记调用 = 内存泄漏
+
+// LoomFlow 风格 (遵循 ScopedValue 设计)
+FlowContext.with(KEY, "value").run(() -> {
+    String v = FlowContext.get(KEY);
+}); // ✅ 自动清理，不可能泄漏
+```
+
+**这是有意为之的设计**，源自 JDK ScopedValue 的核心理念：
+
+| 特性 | ThreadLocal/TTL | ScopedValue/LoomFlow |
+|------|-----------------|----------------------|
+| 生命周期 | 隐式（需手动 remove） | 显式（词法作用域自动管理） |
+| 内存泄漏风险 | ⚠️ 高 | ✅ 无 |
+| 结构化并发 | ❌ 不支持 | ✅ 天然支持 |
+| 性能 | 一般 | 更优（栈分配，零拷贝） |
+
+### 最佳实践：场景化封装
+
+虽然核心 API 需要显式传递 `ContextKey`，但你可以按业务领域封装便捷工具类：
+
+```java
+public class RequestContext {
+    private static final ContextKey<String> TRACE_ID = ContextKey.of("traceId");
+    private static final ContextKey<String> USER_ID = ContextKey.of("userId");
+    
+    // 语义化的 getter，无需传 Key
+    public static String traceId() { return FlowContext.get(TRACE_ID); }
+    public static String userId() { return FlowContext.get(USER_ID); }
+    
+    // 便捷的作用域构建器
+    public static FlowScope forRequest(String traceId, String userId) {
+        return FlowContext.with(TRACE_ID, traceId).with(USER_ID, userId);
+    }
+}
+
+// 使用体验接近 TTL，但保持 ScopedValue 的安全性
+RequestContext.forRequest("abc-123", "user-1").run(() -> {
+    log.info("trace={}, user={}", RequestContext.traceId(), RequestContext.userId());
+});
+```
+
+> **建议**：每个微服务定义自己的 `RequestContext` / `SecurityContext` / `TenantContext`，既保持类型安全，又简化调用。
+
+---
+
 ## 📦 依赖引入
 
 推荐使用 BOM 进行版本管理：
@@ -115,12 +171,14 @@ FlowContext.with(TRACE_ID, "uuid-1234").run(() -> {
 LoomFlow 扩展了 `StructuredTaskScope`，解决了原生 API 在 `fork` 时无法自动继承父线程 `ScopedValue` 的限制（注：原生 ScopedValue 仅在同一个 Thread 或通过 `ScopedValue.Carrier` 显式传递）。
 
 ```java
-try (var scope = new FlowTaskScope<String>()) {
+// 使用工厂方法创建作用域（兼容 JDK 21 和 JDK 25）
+try (var scope = FlowTaskScope.shutdownOnFailure()) {
     // fork 的子任务自动继承当前 FlowContext
     scope.fork(() -> fetchDataA());
     scope.fork(() -> fetchDataB());
     
     scope.join();
+    scope.throwIfFailed();
 }
 
 // 或者使用便捷 API
