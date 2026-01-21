@@ -114,7 +114,10 @@ public final class OtelBridge {
      *
      * @param task 原始任务
      * @return 包装后的任务
+     * @deprecated 自 0.3.0 起，建议使用 {@link FlowContext#wrap(Runnable)}，
+     *             它会自动通过 SPI 传递 OTel 上下文。
      */
+    @Deprecated
     public static Runnable wrap(Runnable task) {
         Context otelContext = Context.current();
         return () -> otelContext.wrap(task).run();
@@ -125,7 +128,10 @@ public final class OtelBridge {
      *
      * @param task 原始任务
      * @return 包装后的任务
+     * @deprecated 自 0.3.0 起，建议使用 {@link FlowContext#wrap(Runnable)}，
+     *             它会自动处理所有上下文传递。
      */
+    @Deprecated
     public static Runnable wrapBoth(Runnable task) {
         Context otelContext = Context.current();
         Runnable flowWrapped = FlowContext.wrap(task);

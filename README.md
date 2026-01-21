@@ -29,7 +29,7 @@
         <dependency>
             <groupId>io.github.urzeye</groupId>
             <artifactId>loomflow-bom</artifactId>
-            <version>0.2.0</version>
+            <version>0.3.0</version>
             <type>pom</type>
             <scope>import</scope>
         </dependency>
@@ -143,17 +143,26 @@ loomflow:
   wrap-async: true         # 默认为 true
 ```
 
-### 3. MDC 与 Trace 集成
+### 3. MDC 与 Trace 集成 (Auto SPI)
 
-解决异步操作中 MDC 上下文丢失的问题。
+LoomFlow 利用 Java SPI 机制实现了对第三方上下文的自动传递。只需引入 `loomflow-integrations` 依赖，以下上下文将自动跨线程传递，**无需任何手动配置或代码修改**：
+
+* **SLF4J MDC**: 自动捕获主线程 MDC，传递由于线程池，并在任务结束时清理。
+* **OpenTelemetry**: 自动传递当前的 OpenTelemetry Clip Context。
+
+```xml
+<dependency>
+    <artifactId>loomflow-integrations</artifactId>
+</dependency>
+```
+
+**效果：**
 
 ```java
-// 手动同步到 MDC
-FlowContext.with(TRACE_ID, "abc-123").run(() -> {
-     MdcBridge.put(TRACE_ID); // 同步
-     
-     // MDC.get("traceId") == "abc-123"
-     log.info("Business processing..."); 
+MDC.put("traceId", "abc-123");
+executor.submit(() -> {
+     // 自动生效！无需 MdcBridge.wrap()
+     logger.info("Business processing..."); // log 包含 traceId: abc-123
 });
 ```
 

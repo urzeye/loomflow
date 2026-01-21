@@ -90,11 +90,15 @@ public final class MdcBridge {
      *
      * @param task 原始任务
      * @return 包装后的任务
+     * @deprecated 自 0.3.0 起，建议使用 {@link FlowContext#wrap(Runnable)}，它不仅传递 FlowContext，
+     *             还会通过 SPI 自动传递 MDC 上下文 (无需手动显示调用此方法)。
      */
+    @Deprecated
     public static Runnable wrapWithMdc(Runnable task) {
         Map<String, String> mdcContext = MDC.getCopyOfContextMap();
         
         return () -> {
+            // ... (keep implementation for backward compatibility, or delegate to FlowContext.wrap if we wanted but that might be circular)
             if (mdcContext != null) {
                 MDC.setContextMap(mdcContext);
             }

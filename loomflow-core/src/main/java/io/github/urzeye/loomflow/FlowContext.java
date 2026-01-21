@@ -16,6 +16,9 @@
 package io.github.urzeye.loomflow;
 
 import io.github.urzeye.loomflow.executor.ContextAwareExecutor;
+import io.github.urzeye.loomflow.spi.LoomFlowWrapped;
+import io.github.urzeye.loomflow.wrapper.FlowCallable;
+import io.github.urzeye.loomflow.wrapper.FlowRunnable;
 
 import java.util.Objects;
 import java.util.concurrent.Callable;
@@ -153,18 +156,27 @@ public final class FlowContext {
 
     /**
      * 包装 Runnable，使其在执行时继承当前上下文。
+     * <p>
+     * 具备幂等性：如果任务已经被 loomflow 包装过，将直接返回原对象。
+     * </p>
      *
      * @param task 原始任务
      * @return 包装后的任务
      */
     public static Runnable wrap(Runnable task) {
         Objects.requireNonNull(task, "task must not be null");
+        if (task instanceof LoomFlowWrapped) {
+            return task;
+        }
         ContextCarrier carrier = ContextCarrier.capture();
-        return () -> carrier.restore(task);
+        return new FlowRunnable(carrier, task);
     }
 
     /**
      * 包装 Callable，使其在执行时继承当前上下文。
+     * <p>
+     * 具备幂等性：如果任务已经被 loomflow 包装过，将直接返回原对象。
+     * </p>
      *
      * @param task 原始任务
      * @param <T>  返回值类型
@@ -172,8 +184,11 @@ public final class FlowContext {
      */
     public static <T> Callable<T> wrap(Callable<T> task) {
         Objects.requireNonNull(task, "task must not be null");
+        if (task instanceof LoomFlowWrapped) {
+            return task;
+        }
         ContextCarrier carrier = ContextCarrier.capture();
-        return () -> carrier.restore(task);
+        return new FlowCallable<>(carrier, task);
     }
 
     /**
@@ -185,6 +200,8 @@ public final class FlowContext {
      */
     public static <T> Supplier<T> wrap(Supplier<T> supplier) {
         Objects.requireNonNull(supplier, "supplier must not be null");
+        // Supplier 比较特殊，通常是 lambda，很难做 instanceof 检查，而且没有 LoomFlowWrapped 实现类
+        // 这里暂时保持原样，或者也创建一个 FlowSupplier
         ContextCarrier carrier = ContextCarrier.capture();
         return () -> carrier.restore(supplier);
     }

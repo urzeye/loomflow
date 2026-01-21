@@ -48,7 +48,7 @@
         <maven.compiler.release>21</maven.compiler.release>
         
         <!-- Versions -->
-        <revision>0.2.0</revision>
+        <revision>0.3.0</revision>
         <loomflow.version>${revision}</loomflow.version>
         <junit.version>5.11.4</junit.version>
         <bytebuddy.version>1.15.11</bytebuddy.version>
