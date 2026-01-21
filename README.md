@@ -184,6 +184,10 @@ timer.schedule(wrapped, 1000);
 
 本项目参考了 [Alibaba/transmittable-thread-local](https://github.com/alibaba/transmittable-thread-local) 的设计思想，将其理念适配到 JDK 21+ 的虚拟线程与 ScopedValue 生态中。
 
+> **LoomFlow 不需要成为下一个 TTL，而应该成为 “ScopedValue 时代的 TTL”。**
+>
+> 重点不应是兼容所有老旧场景（那交给 TTL 就好），而是解决 **虚拟线程池化** 和 **结构化并发跨线程** 这两个核心新痛点。
+
 ### License
 
 [Apache 2.0 License](LICENSE)
