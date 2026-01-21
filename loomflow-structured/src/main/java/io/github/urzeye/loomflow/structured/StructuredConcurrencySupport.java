@@ -43,9 +43,8 @@ final class StructuredConcurrencySupport {
     private static final MethodHandle JOIN_MH;
     private static final MethodHandle CLOSE_MH;
 
-    // 原始 StructuredTaskScope 支持 (无特定策略，仅 fork/join)
-    private static final MethodHandle OPEN_RAW_MH; // 如果是 JDK 21 则为 null (使用构造函数反射)
-    private static final java.lang.reflect.Constructor<?> RAW_CONSTRUCTOR; // 如果是 JDK 25 则为 null
+    // 原始 StructuredTaskScope 支持 (仅 JDK 25+)
+    private static final MethodHandle OPEN_RAW_MH; // JDK 25: StructuredTaskScope.open(); JDK 21: null
 
     static {
         MethodHandle failMh = null;
@@ -62,7 +61,6 @@ final class StructuredConcurrencySupport {
         MethodHandle openSuccessTemp = null;
 
         MethodHandle rawMh = null;
-        java.lang.reflect.Constructor<?> rawCtor = null;
 
         try {
             // 通用方法查找 (尝试在基类/接口上查找)
@@ -87,14 +85,8 @@ final class StructuredConcurrencySupport {
                 openFailTemp = failMh;
                 openSuccessTemp = successMh;
 
-                // JDK 21: 通过反射直接实例化 StructuredTaskScope
-                // 以避免在源码中使用子类导致 JDK 25 编译失败 (extends Interface vs Class)
-                // 构造函数是 protected 的：允许访问
-                try {
-                    rawCtor = scopeType.getDeclaredConstructor(String.class, java.util.concurrent.ThreadFactory.class);
-                    rawCtor.setAccessible(true);
-                } catch (NoSuchMethodException e) {
-                }
+                // JDK 21: Raw StructuredTaskScope 不支持 (需要 setAccessible，会触发模块系统限制)
+                // 用户应使用 shutdownOnFailure() 或 shutdownOnSuccess()
 
             } catch (ClassNotFoundException e) {
                 // JDK 25 路径
@@ -146,7 +138,6 @@ final class StructuredConcurrencySupport {
         JOINER_SUCCESS = joinerSuccess;
 
         OPEN_RAW_MH = rawMh;
-        RAW_CONSTRUCTOR = rawCtor;
 
         IS_JDK25_STYLE = jdk25;
     }
@@ -183,6 +174,20 @@ final class StructuredConcurrencySupport {
             }
         }
 
+        /**
+         * Join and return the result (for JDK 25 Joiner-based scopes).
+         * On JDK 21, returns null (result must be obtained via result() method).
+         */
+        Object joinAndGetResult() throws InterruptedException {
+            try {
+                return JOIN_MH.invoke(rawScope);
+            } catch (InterruptedException | RuntimeException e) {
+                throw e;
+            } catch (Throwable e) {
+                throw new RuntimeException("Failed to join scope", e);
+            }
+        }
+
         @Override
         public void close() {
             try {
@@ -191,6 +196,13 @@ final class StructuredConcurrencySupport {
                 throw new RuntimeException("Failed to close scope", e);
             }
         }
+    }
+
+    /**
+     * 返回是否运行在 JDK 25+ 风格的 API 上。
+     */
+    static boolean isJdk25Style() {
+        return IS_JDK25_STYLE;
     }
 
     static ScopeHandle openFailureScope() {
@@ -222,24 +234,19 @@ final class StructuredConcurrencySupport {
     }
 
     static ScopeHandle openRawScope() {
-        if (!IS_JDK25_STYLE) {
-            // JDK 21 兼容方式：通过反射实例化
-            if (RAW_CONSTRUCTOR == null) {
-                throw new UnsupportedOperationException("Raw StructuredTaskScope cannot be instantiated on this JDK 21 variant.");
-            }
-            try {
-                // name=null, factory=Thread.ofVirtual().factory()
-                return new ScopeHandle(RAW_CONSTRUCTOR.newInstance(null, Thread.ofVirtual().factory()));
-            } catch (ReflectiveOperationException e) {
-                // 如果是抽象类，会抛出 InstantiationException
-                throw new RuntimeException("Failed to instantiate raw StructuredTaskScope", e);
-            }
-        } else {
+        if (IS_JDK25_STYLE) {
+            // JDK 25: 使用公开的 StructuredTaskScope.open() 静态方法
             try {
                 return new ScopeHandle(OPEN_RAW_MH.invoke());
             } catch (Throwable e) {
-                throw new RuntimeException(e);
+                throw new RuntimeException("Failed to open raw StructuredTaskScope", e);
             }
+        } else {
+            // JDK 21: 不支持 raw scope (需要 setAccessible 绕过模块系统限制)
+            // 用户应使用 shutdownOnFailure() 或 shutdownOnSuccess()
+            throw new UnsupportedOperationException(
+                "Raw StructuredTaskScope is not supported on JDK 21. " +
+                "Please use FlowTaskScope.shutdownOnFailure() or FlowTaskScope.shutdownOnSuccess() instead.");
         }
     }
 }

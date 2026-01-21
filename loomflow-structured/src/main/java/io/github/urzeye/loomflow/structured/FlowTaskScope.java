@@ -63,20 +63,29 @@ public class FlowTaskScope<T> implements AutoCloseable {
     protected final StructuredConcurrencySupport.ScopeHandle delegate;
 
     /**
-     * 使用默认配置创建任务作用域
+     * 使用默认配置创建任务作用域。
+     * <p>
+     * <b>注意：此构造函数仅在 JDK 25+ 上可用。</b>
+     * 在 JDK 21 上请使用 {@link #shutdownOnFailure()} 或 {@link #shutdownOnSuccess()} 工厂方法。
+     * </p>
+     *
+     * @throws UnsupportedOperationException 在 JDK 21 上调用时抛出
      */
     public FlowTaskScope() {
         this.delegate = StructuredConcurrencySupport.openRawScope();
     }
 
     /**
-     * 使用指定名称创建任务作用域
+     * 使用指定名称创建任务作用域。
+     * <p>
+     * <b>注意：此构造函数仅在 JDK 25+ 上可用。</b>
+     * 在 JDK 21 上请使用 {@link #shutdownOnFailure()} 或 {@link #shutdownOnSuccess()} 工厂方法。
+     * </p>
      *
-     * @param name 作用域名称，用于调试
+     * @param name 作用域名称，用于调试（当前版本忽略此参数）
+     * @throws UnsupportedOperationException 在 JDK 21 上调用时抛出
      */
     public FlowTaskScope(String name) {
-        // JDK 25/21 Raw Scope abstraction doesn't support name easily via current Shim, 
-        // fallback to default raw scope for compatibility.
         this.delegate = StructuredConcurrencySupport.openRawScope();
     }
 
@@ -153,28 +162,56 @@ public class FlowTaskScope<T> implements AutoCloseable {
 
     // ShutdownOnSuccess 包装器
     public static class ShutdownOnSuccess<T> extends FlowTaskScope<T> {
+        // 用于缓存 JDK 25 上 join() 返回的结果
+        private volatile Object joinResult;
+
         public ShutdownOnSuccess(StructuredConcurrencySupport.ScopeHandle delegate) {
             super(delegate);
         }
 
+        @Override
+        public FlowTaskScope<T> join() throws InterruptedException {
+            if (StructuredConcurrencySupport.isJdk25Style()) {
+                // JDK 25: join() 直接返回第一个成功的结果
+                this.joinResult = delegate.joinAndGetResult();
+            } else {
+                // JDK 21: join() 不返回值，需要调用 result()
+                delegate.join();
+            }
+            return this;
+        }
+
+        /**
+         * 获取第一个成功任务的结果。
+         * <p>
+         * 必须在 {@link #join()} 之后调用。
+         * </p>
+         *
+         * @return 第一个成功任务的结果
+         * @throws java.util.concurrent.ExecutionException 如果任务执行失败
+         * @throws InterruptedException 如果被中断
+         */
         @SuppressWarnings("unchecked")
         public T result() throws java.util.concurrent.ExecutionException, InterruptedException {
-            try {
-                java.lang.reflect.Method m = super.delegate.rawScope.getClass().getMethod("result");
-                return (T) m.invoke(super.delegate.rawScope);
-            } catch (NoSuchMethodException e) {
-                // JDK 25: Joiner 行为，join() 返回 scope
-                // 如果 JDK 25 移除了 result()，此包装器难以实现，除非我们手动追踪 subtask
-                // 暂时抛出不支持异常，建议使用 FlowTasks
-                throw new UnsupportedOperationException("On JDK 25, please use FlowTasks.invokeAny() or examine Subtasks directly.");
-            } catch (Exception e) {
-                if (e instanceof java.lang.reflect.InvocationTargetException) {
-                    Throwable target = ((java.lang.reflect.InvocationTargetException) e).getTargetException();
-                    if (target instanceof java.util.concurrent.ExecutionException)
-                        throw (java.util.concurrent.ExecutionException) target;
-                    throw new RuntimeException(target);
+            if (StructuredConcurrencySupport.isJdk25Style()) {
+                // JDK 25: 返回 join() 时缓存的结果
+                return (T) joinResult;
+            } else {
+                // JDK 21: 调用底层 scope 的 result() 方法
+                try {
+                    java.lang.reflect.Method m = super.delegate.rawScope.getClass().getMethod("result");
+                    return (T) m.invoke(super.delegate.rawScope);
+                } catch (NoSuchMethodException e) {
+                    throw new UnsupportedOperationException("result() method not found", e);
+                } catch (Exception e) {
+                    if (e instanceof java.lang.reflect.InvocationTargetException) {
+                        Throwable target = ((java.lang.reflect.InvocationTargetException) e).getTargetException();
+                        if (target instanceof java.util.concurrent.ExecutionException)
+                            throw (java.util.concurrent.ExecutionException) target;
+                        throw new RuntimeException(target);
+                    }
+                    throw new RuntimeException(e);
                 }
-                throw new RuntimeException(e);
             }
         }
     }

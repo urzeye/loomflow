@@ -76,10 +76,12 @@ class FlowTasksTest {
     @DisplayName("FlowTaskScope.fork - 子任务自动继承上下文")
     void testFlowTaskScopeFork() throws Exception {
         FlowContext.with(TRACE_ID, "scope-test").run(() -> {
-            try (var scope = new FlowTaskScope<String>("test-scope")) {
+            // 使用 shutdownOnFailure() 工厂方法，兼容 JDK 21 和 JDK 25
+            try (var scope = FlowTaskScope.shutdownOnFailure()) {
                 var subtask = scope.fork(() -> FlowContext.get(TRACE_ID));
                 
                 scope.join();
+                scope.throwIfFailed();
                 
                 assertEquals("scope-test", subtask.get());
             } catch (Exception e) {
@@ -101,6 +103,28 @@ class FlowTasksTest {
                 
                 scope.join();
                 scope.throwIfFailed();
+            } catch (Exception e) {
+                fail(e);
+            }
+        });
+    }
+
+    @Test
+    @DisplayName("ShutdownOnSuccess - 获取第一个成功结果")
+    void testShutdownOnSuccess() {
+        FlowContext.with(TRACE_ID, "success-test").run(() -> {
+            try (var scope = FlowTaskScope.<String>shutdownOnSuccess()) {
+                scope.fork(() -> {
+                    Thread.sleep(100); // 慢任务
+                    return "slow";
+                });
+                scope.fork(() -> FlowContext.get(TRACE_ID)); // 快任务，应该先返回
+                
+                scope.join();
+                String result = scope.result();
+                
+                // 验证返回了第一个成功的结果（快任务）
+                assertEquals("success-test", result);
             } catch (Exception e) {
                 fail(e);
             }
