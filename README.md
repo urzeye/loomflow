@@ -185,6 +185,17 @@ try (var scope = FlowTaskScope.shutdownOnFailure()) {
 List<String> results = FlowTasks.invokeAll(task1, task2);
 ```
 
+**超时控制**：
+
+```java
+// 方式 1: FlowTaskScope
+scope.join(Duration.ofSeconds(5)); // 超时 5 秒，抛出 TimeoutException
+
+// 方式 2: FlowTasks
+List<String> results = FlowTasks.invokeAll(Duration.ofSeconds(5), task1, task2);
+String fastest = FlowTasks.invokeAny(Duration.ofSeconds(5), task1, task2);
+```
+
 ### 2. Spring Boot 集成
 
 引入 `loomflow-spring-boot-starter` 后，提供如下开箱即用的能力：
