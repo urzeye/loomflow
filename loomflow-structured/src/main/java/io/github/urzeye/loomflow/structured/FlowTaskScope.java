@@ -15,9 +15,7 @@
  */
 package io.github.urzeye.loomflow.structured;
 
-import java.util.concurrent.Callable;
 import java.util.concurrent.StructuredTaskScope;
-import java.util.function.Supplier;
 
 /**
  * 结构化并发任务作用域。

@@ -158,6 +158,7 @@ public final class FlowContext {
      * 包装 Runnable，使其在执行时继承当前上下文。
      * <p>
      * 具备幂等性：如果任务已经被 loomflow 包装过，将直接返回原对象。
+     * 具备快速失败优化：如果当前没有任何上下文绑定，将直接返回原对象。
      * </p>
      *
      * @param task 原始任务
@@ -169,6 +170,9 @@ public final class FlowContext {
             return task;
         }
         ContextCarrier carrier = ContextCarrier.capture();
+        if (carrier == null) {
+            return task;
+        }
         return new FlowRunnable(carrier, task);
     }
 
@@ -176,6 +180,7 @@ public final class FlowContext {
      * 包装 Callable，使其在执行时继承当前上下文。
      * <p>
      * 具备幂等性：如果任务已经被 loomflow 包装过，将直接返回原对象。
+     * 具备快速失败优化：如果当前没有任何上下文绑定，将直接返回原对象。
      * </p>
      *
      * @param task 原始任务
@@ -188,6 +193,9 @@ public final class FlowContext {
             return task;
         }
         ContextCarrier carrier = ContextCarrier.capture();
+        if (carrier == null) {
+            return task;
+        }
         return new FlowCallable<>(carrier, task);
     }
 
@@ -203,6 +211,9 @@ public final class FlowContext {
         // Supplier 比较特殊，通常是 lambda，很难做 instanceof 检查，而且没有 LoomFlowWrapped 实现类
         // 这里暂时保持原样，或者也创建一个 FlowSupplier
         ContextCarrier carrier = ContextCarrier.capture();
+        if (carrier == null) {
+            return supplier;
+        }
         return () -> carrier.restore(supplier);
     }
 
@@ -309,6 +320,9 @@ public final class FlowContext {
     public static java.util.TimerTask wrap(java.util.TimerTask task) {
         Objects.requireNonNull(task, "task must not be null");
         ContextCarrier carrier = ContextCarrier.capture();
+        if (carrier == null) {
+            return task;
+        }
         return new java.util.TimerTask() {
             @Override
             public void run() {

@@ -15,9 +15,6 @@
  */
 package io.github.urzeye.loomflow.structured;
 
-import io.github.urzeye.loomflow.ContextKey;
-import io.github.urzeye.loomflow.FlowContext;
-
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.StructuredTaskScope;
