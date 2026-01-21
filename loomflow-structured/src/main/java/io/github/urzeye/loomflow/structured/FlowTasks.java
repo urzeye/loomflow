@@ -67,16 +67,27 @@ public final class FlowTasks {
      */
     @SafeVarargs
     public static <T> List<T> invokeAll(Callable<T>... tasks) throws Exception {
-        try (var scope = new StructuredTaskScope.ShutdownOnFailure()) {
+        try (var scope = StructuredConcurrencySupport.openFailureScope()) {
             List<StructuredTaskScope.Subtask<T>> subtasks = new java.util.ArrayList<>();
-            
+
             for (Callable<T> task : tasks) {
                 subtasks.add(scope.fork(task::call));
             }
-            
+
             scope.join();
-            scope.throwIfFailed();
-            
+
+            // Manual throwIfFailed check (compatible with both SDKs)
+            for (StructuredTaskScope.Subtask<T> subtask : subtasks) {
+                if (subtask.state() == StructuredTaskScope.Subtask.State.FAILED) {
+                    Throwable ex = subtask.exception();
+                    if (ex instanceof Exception) {
+                        throw (Exception) ex;
+                    } else {
+                        throw new RuntimeException(ex);
+                    }
+                }
+            }
+
             return subtasks.stream()
                     .map(StructuredTaskScope.Subtask::get)
                     .collect(Collectors.toList());
@@ -97,13 +108,23 @@ public final class FlowTasks {
      */
     @SafeVarargs
     public static <T> T invokeAny(Callable<T>... tasks) throws Exception {
-        try (var scope = new StructuredTaskScope.ShutdownOnSuccess<T>()) {
+        try (var scope = StructuredConcurrencySupport.openSuccessScope()) {
+            List<StructuredTaskScope.Subtask<T>> subtasks = new java.util.ArrayList<>();
             for (Callable<T> task : tasks) {
-                scope.fork(task::call);
+                subtasks.add(scope.fork(task::call));
             }
-            
+
             scope.join();
-            return scope.result();
+
+            // Manual result retrieval
+            for (StructuredTaskScope.Subtask<T> subtask : subtasks) {
+                if (subtask.state() == StructuredTaskScope.Subtask.State.SUCCESS) {
+                    return subtask.get();
+                }
+            }
+            // All failed
+            // Collect exceptions or throw generic
+            throw new java.util.concurrent.ExecutionException("No task completed successfully", null);
         }
     }
 

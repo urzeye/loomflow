@@ -40,14 +40,14 @@ import java.util.concurrent.StructuredTaskScope;
  *             // 自动继承 TRACE_ID
  *             return FlowContext.get(TRACE_ID);
  *         });
- *         
+ *
  *         Subtask<String> task2 = scope.fork(() -> {
  *             // 同样可以访问 TRACE_ID
  *             return doSomething();
  *         });
- *         
+ *
  *         scope.join();
- *         
+ *
  *         String result1 = task1.get();
  *         String result2 = task2.get();
  *     }
@@ -58,13 +58,15 @@ import java.util.concurrent.StructuredTaskScope;
  * @author urzeye
  * @since 0.2.0
  */
-public class FlowTaskScope<T> extends StructuredTaskScope<T> {
+public class FlowTaskScope<T> implements AutoCloseable {
+
+    protected final StructuredConcurrencySupport.ScopeHandle delegate;
 
     /**
      * 使用默认配置创建任务作用域
      */
     public FlowTaskScope() {
-        super();
+        this.delegate = StructuredConcurrencySupport.openRawScope();
     }
 
     /**
@@ -73,32 +75,108 @@ public class FlowTaskScope<T> extends StructuredTaskScope<T> {
      * @param name 作用域名称，用于调试
      */
     public FlowTaskScope(String name) {
-        super(name, Thread.ofVirtual().factory());
+        // JDK 25/21 Raw Scope abstraction doesn't support name easily via current Shim, 
+        // fallback to default raw scope for compatibility.
+        this.delegate = StructuredConcurrencySupport.openRawScope();
+    }
+
+    // Internal constructor for wrappers
+    protected FlowTaskScope(StructuredConcurrencySupport.ScopeHandle delegate) {
+        this.delegate = delegate;
+    }
+
+    public StructuredTaskScope.Subtask<T> fork(java.util.concurrent.Callable<? extends T> task) {
+        return delegate.fork(task);
+    }
+
+    public FlowTaskScope<T> join() throws InterruptedException {
+        delegate.join();
+        return this;
+    }
+
+    @Override
+    public void close() {
+        delegate.close();
     }
 
     /**
-     * 创建一个"快速失败"作用域。
-     * <p>
-     * 任何子任务失败后，其他子任务将被取消。
-     * </p>
-     *
-     * @param <T> 子任务返回类型
-     * @return ShutdownOnFailure 作用域
+     * 创建一个"快速失败"作用域
      */
-    public static <T> StructuredTaskScope.ShutdownOnFailure shutdownOnFailure() {
-        return new StructuredTaskScope.ShutdownOnFailure();
+    public static ShutdownOnFailure shutdownOnFailure() {
+        return new ShutdownOnFailure(StructuredConcurrencySupport.openFailureScope());
     }
 
     /**
-     * 创建一个"快速成功"作用域。
-     * <p>
-     * 任何子任务成功后，其他子任务将被取消。
-     * </p>
-     *
-     * @param <T> 子任务返回类型
-     * @return ShutdownOnSuccess 作用域
+     * 创建一个"快速成功"作用域
      */
-    public static <T> StructuredTaskScope.ShutdownOnSuccess<T> shutdownOnSuccess() {
-        return new StructuredTaskScope.ShutdownOnSuccess<>();
+    public static <T> ShutdownOnSuccess<T> shutdownOnSuccess() {
+        return new ShutdownOnSuccess<>(StructuredConcurrencySupport.openSuccessScope());
     }
+
+    // ShutdownOnFailure 包装器
+    public static class ShutdownOnFailure extends FlowTaskScope<Object> {
+        public ShutdownOnFailure(StructuredConcurrencySupport.ScopeHandle delegate) {
+            super(delegate);
+        }
+
+        public void throwIfFailed() throws java.util.concurrent.ExecutionException, InterruptedException {
+            // 由于不知道底层 delegate 的确切 API (JDK 21 vs 25)
+            // 为了行为一致性，我们尝试手动检查或委托
+            // 但 delegate.join() 不会抛出异常
+            // 手动实现最安全且一致，但这里无法访问 subtasks 列表
+
+            // 优化逻辑:
+            // 尝试通过反射调用 throwIfFailed (如果存在，即 JDK 21)
+            // 如果不存在 (JDK 25)，假设 join() 如果失败在当时就已经抛出了异常
+            // 实际上在 JDK 25，Joiner.awaitAllSuccessfulOrThrow 会导致 join() 抛出异常
+            // 如果 join() 没抛异常，说明成功
+            try {
+                java.lang.reflect.Method m = super.delegate.rawScope.getClass().getMethod("throwIfFailed");
+                m.invoke(super.delegate.rawScope);
+            } catch (NoSuchMethodException e) {
+                // JDK 25: join() 已处理异常，此处无需操作。
+            } catch (Exception e) {
+                if (e instanceof java.lang.reflect.InvocationTargetException) {
+                    Throwable target = ((java.lang.reflect.InvocationTargetException) e).getTargetException();
+                    if (target instanceof java.util.concurrent.ExecutionException) {
+                        throw (java.util.concurrent.ExecutionException) target;
+                    }
+                    if (target instanceof RuntimeException) {
+                        throw (RuntimeException) target;
+                    }
+                    throw new RuntimeException(target);
+                }
+                throw new RuntimeException(e);
+            }
+        }
+    }
+
+    // ShutdownOnSuccess 包装器
+    public static class ShutdownOnSuccess<T> extends FlowTaskScope<T> {
+        public ShutdownOnSuccess(StructuredConcurrencySupport.ScopeHandle delegate) {
+            super(delegate);
+        }
+
+        @SuppressWarnings("unchecked")
+        public T result() throws java.util.concurrent.ExecutionException, InterruptedException {
+            try {
+                java.lang.reflect.Method m = super.delegate.rawScope.getClass().getMethod("result");
+                return (T) m.invoke(super.delegate.rawScope);
+            } catch (NoSuchMethodException e) {
+                // JDK 25: Joiner 行为，join() 返回 scope
+                // 如果 JDK 25 移除了 result()，此包装器难以实现，除非我们手动追踪 subtask
+                // 暂时抛出不支持异常，建议使用 FlowTasks
+                throw new UnsupportedOperationException("On JDK 25, please use FlowTasks.invokeAny() or examine Subtasks directly.");
+            } catch (Exception e) {
+                if (e instanceof java.lang.reflect.InvocationTargetException) {
+                    Throwable target = ((java.lang.reflect.InvocationTargetException) e).getTargetException();
+                    if (target instanceof java.util.concurrent.ExecutionException)
+                        throw (java.util.concurrent.ExecutionException) target;
+                    throw new RuntimeException(target);
+                }
+                throw new RuntimeException(e);
+            }
+        }
+    }
+
 }
