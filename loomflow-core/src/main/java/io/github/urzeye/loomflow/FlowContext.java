@@ -109,6 +109,22 @@ public final class FlowContext {
     }
 
     /**
+     * 获取当前上下文中指定键的值，如果未绑定则返回 null。
+     *
+     * @param key 上下文键
+     * @param <T> 值类型
+     * @return 上下文值或 null
+     */
+    public static <T> T getOrNull(ContextKey<T> key) {
+        Objects.requireNonNull(key, "key must not be null");
+        ScopedValue<T> sv = key.scopedValue();
+        if (sv.isBound()) {
+            return sv.get();
+        }
+        return key.defaultValue().orElse(null);
+    }
+
+    /**
      * 检查指定键是否在当前上下文中绑定。
      *
      * @param key 上下文键
@@ -171,6 +187,17 @@ public final class FlowContext {
         Objects.requireNonNull(supplier, "supplier must not be null");
         ContextCarrier carrier = ContextCarrier.capture();
         return () -> carrier.restore(supplier);
+    }
+
+    /**
+     * 包装 Supplier（别名方法，供 Agent 使用）。
+     *
+     * @param supplier 原始供应器
+     * @param <T>      返回值类型
+     * @return 包装后的供应器
+     */
+    public static <T> Supplier<T> wrapSupplier(Supplier<T> supplier) {
+        return wrap(supplier);
     }
 
     // ==================== 执行器包装 ====================
@@ -245,7 +272,42 @@ public final class FlowContext {
      * @param executor 执行器
      * @return CompletableFuture
      */
-    public static CompletableFuture<Void> runAsync(Runnable runnable, Executor executor) {
-        return CompletableFuture.runAsync(wrap(runnable), executor);
+    // ==================== TimerTask 支持 ====================
+
+    /**
+     * 包装 TimerTask，使其在执行时继承当前上下文。
+     * <p>
+     * <strong>注意：</strong> 由于 {@link java.util.Timer} 的设计限制，
+     * 使用包装后的任务时，必须对 <strong>包装后的实例</strong> 调用 {@code cancel()}。
+     * 如果通过原始任务引用调用 {@code cancel()}，定时器将无法感知，可能导致任务继续执行。
+     * </p>
+     * <p>
+     * 建议尽可能使用 {@link java.util.concurrent.ScheduledExecutorService} 代替 {@link java.util.Timer}，
+     * 前者已通过 Agent 完美支持。
+     * </p>
+     *
+     * @param task 原始 TimerTask
+     * @return 包装后的 TimerTask
+     */
+    public static java.util.TimerTask wrap(java.util.TimerTask task) {
+        Objects.requireNonNull(task, "task must not be null");
+        ContextCarrier carrier = ContextCarrier.capture();
+        return new java.util.TimerTask() {
+            @Override
+            public void run() {
+                carrier.restore(task::run);
+            }
+
+            @Override
+            public boolean cancel() {
+                task.cancel();
+                return super.cancel();
+            }
+
+            @Override
+            public long scheduledExecutionTime() {
+                return task.scheduledExecutionTime();
+            }
+        };
     }
 }

@@ -1,172 +1,189 @@
 # LoomFlow
 
-[![Java](https://img.shields.io/badge/Java-25+-orange.svg)](https://openjdk.org/)
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-Apache%202-4EB1BA.svg)](https://www.apache.org/licenses/LICENSE-2.0.html)
 
-> 下一代 Java 上下文管理库，面向 JDK 25+ 虚拟线程时代，零 Agent、Loom-First。
+`LoomFlow` 是面向 JDK 21+ 虚拟线程（Project Loom）场景的上下文管理框架。它基于 `ScopedValue` 和 `StructuredTaskScope` 标准 API 构建，旨在解决虚拟线程在线程池复用场景下的上下文（Context）传递与保持问题。
 
-## ✨ 特性
+## 📖 简介
 
-- **零 Agent**：纯依赖库，无需 Java Agent，无侵入式改造
-- **Loom-First**：基于 JDK 25 ScopedValue 设计，原生支持虚拟线程
-- **类型安全**：泛型 ContextKey，编译时类型检查
-- **声明式 API**：`FlowContext.with().run()` 链式调用，清晰优雅
-- **自动传递**：线程池装饰器自动传递上下文，无需手动包装
+在 JDK 21 引入虚拟线程后，虽然依然存在线程池复用的场景（如 `ExecutorService` 或旧有代码迁移），但传统的 `ThreadLocal` 方案存在内存泄漏风险且不支持结构化并发，而原生的 `ScopedValue` 仅支持在词法作用域内传递，无法直接穿透线程池。
 
-## 📦 安装
+`LoomFlow` 提供了一套完整的解决方案，通过 Java Agent 低侵入地增强 JDK 核心类，实现上下文在线程池、异步任务中的透明传递，并天然支持结构化并发模式。
 
-### Maven
+### 核心功能
+
+* **透明上下文传递**: 无需修改业务代码，自动在 `ExecutorService`, `CompletableFuture`, `ForkJoinPool` 中传递上下文。
+* **ScopedValue 原生**: 基于 JEP 429/446 标准，性能优于 `ThreadLocal`，零拷贝开销。
+* **结构化并发增强**: 扩展 `StructuredTaskScope`，子任务自动继承父作用域上下文。
+* **生态集成**: 提供 Spring Boot Starter、SLF4J MDC 桥接、OpenTelemetry 支持。
+
+---
+
+## 📦 依赖引入
+
+推荐使用 BOM 进行版本管理：
+
+```xml
+<dependencyManagement>
+    <dependencies>
+        <dependency>
+            <groupId>io.github.urzeye</groupId>
+            <artifactId>loomflow-bom</artifactId>
+            <version>0.2.0-SNAPSHOT</version>
+            <type>pom</type>
+            <scope>import</scope>
+        </dependency>
+    </dependencies>
+</dependencyManagement>
+```
+
+### 1. 核心库 (Required)
 
 ```xml
 <dependency>
     <groupId>io.github.urzeye</groupId>
-    <artifactId>loomflow</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <artifactId>loomflow-core</artifactId>
 </dependency>
 ```
 
-### 系统要求
+### 2. 生态扩展 (Optional)
 
-- **JDK 25+**：推荐，ScopedValue 为正式特性
-- **JDK 21-24**：需添加 `--enable-preview` 参数
+```xml
+<!-- 结构化并发增强 -->
+<dependency>
+    <artifactId>loomflow-structured</artifactId>
+</dependency>
 
-## 🚀 快速开始
+<!-- Spring Boot 自动配置 -->
+<dependency>
+    <artifactId>loomflow-spring-boot-starter</artifactId>
+</dependency>
 
-### 1. 定义上下文键
-
-```java
-import io.github.urzeye.loomflow.ContextKey;
-import io.github.urzeye.loomflow.FlowContext;
-
-// 定义类型安全的上下文键
-public static final ContextKey<String> TRACE_ID = ContextKey.of("traceId");
-public static final ContextKey<User> CURRENT_USER = ContextKey.of("currentUser");
-public static final ContextKey<String> TENANT = ContextKey.of("tenant", "default");
+<!-- 日志与链路追踪集成 -->
+<dependency>
+    <artifactId>loomflow-integrations</artifactId>
+</dependency>
 ```
-
-### 2. 在作用域内运行代码
-
-```java
-FlowContext.with(TRACE_ID, "abc-123")
-    .and(CURRENT_USER, user)
-    .run(() -> {
-        // 在任意位置获取上下文
-        String traceId = FlowContext.get(TRACE_ID);
-        User user = FlowContext.get(CURRENT_USER);
-        
-        processRequest();
-    });
-
-// 带返回值
-String result = FlowContext.with(TRACE_ID, "abc-123")
-    .call(() -> computeResult());
-```
-
-### 3. 线程池场景
-
-```java
-ExecutorService executor = Executors.newFixedThreadPool(10);
-
-// 方式一：装饰整个线程池（推荐）
-ExecutorService contextAware = FlowContext.wrapExecutorService(executor);
-
-FlowContext.with(TRACE_ID, "request-1").run(() -> {
-    contextAware.submit(() -> {
-        // 自动继承上下文
-        String traceId = FlowContext.get(TRACE_ID); // "request-1"
-    });
-});
-
-// 方式二：单次包装
-executor.submit(FlowContext.wrap(() -> {
-    String traceId = FlowContext.get(TRACE_ID);
-}));
-```
-
-### 4. CompletableFuture
-
-```java
-FlowContext.with(TRACE_ID, "async-trace").run(() -> {
-    // 使用 FlowContext 静态方法
-    CompletableFuture<String> future = FlowContext.supplyAsync(() ->
-        "Trace: " + FlowContext.get(TRACE_ID)
-    );
-});
-```
-
-### 5. 虚拟线程
-
-```java
-ExecutorService virtualExecutor = Executors.newVirtualThreadPerTaskExecutor();
-ExecutorService wrapped = FlowContext.wrapExecutorService(virtualExecutor);
-
-FlowContext.with(TRACE_ID, "virtual-thread-test").run(() -> {
-    // 创建百万级虚拟线程，上下文依然正确传递
-    for (int i = 0; i < 1_000_000; i++) {
-        wrapped.submit(() -> {
-            processWithContext();
-        });
-    }
-});
-```
-
-## 🔧 API 参考
-
-### ContextKey
-
-| 方法 | 描述 |
-|------|------|
-| `ContextKey.of(name)` | 创建无默认值的键 |
-| `ContextKey.of(name, default)` | 创建带默认值的键 |
-
-### FlowContext
-
-| 方法 | 描述 |
-|------|------|
-| `with(key, value)` | 开始创建作用域 |
-| `get(key)` | 获取上下文值 |
-| `getOrDefault(key, default)` | 获取值或默认值 |
-| `isBound(key)` | 检查是否已绑定 |
-| `wrap(Runnable)` | 包装任务 |
-| `wrapExecutorService(executor)` | 包装线程池 |
-| `supplyAsync(supplier)` | 创建上下文感知的 Future |
-
-### FlowScope
-
-| 方法 | 描述 |
-|------|------|
-| `and(key, value)` | 添加更多绑定 |
-| `run(Runnable)` | 执行任务 |
-| `call(Callable)` | 执行并返回结果 |
-
-## 📋 与 TTL 对比
-
-| 特性 | LoomFlow | TTL |
-|------|----------|-----|
-| Agent 依赖 | ❌ 不需要 | ✅ 可选 |
-| JDK 版本 | 21+ | 8+ |
-| 虚拟线程 | ✅ 原生支持 | ⚠️ 需要适配 |
-| 内存占用 | 极低（ScopedValue） | 较高（ThreadLocal 拷贝） |
-| 不可变性 | ✅ 天然不可变 | ❌ 可修改 |
-| API 风格 | 声明式 | 命令式 |
-
-## 🛣️ 路线图
-
-- [x] 核心 API（FlowContext、ContextKey）
-- [x] 线程池装饰器
-- [x] CompletableFuture 支持
-- [ ] MDC 桥接插件
-- [ ] Spring 集成
-- [ ] StructuredTaskScope 适配
-
-## 📄 许可证
-
-[Apache License 2.0](LICENSE)
-
-## 🤝 贡献
-
-欢迎提交 Issue 和 Pull Request！
 
 ---
 
-Made with ❤️ for the Java Loom era.
+## 🚀 快速集成
+
+### 方式一：Java Agent 透明增强 (推荐)
+
+在启动命令中添加 Agent 参数，即可实现全自动的上下文传递，无需手动包装 `Runnable`/`Callable`。
+
+```bash
+java -javaagent:/path/to/loomflow-agent.jar -jar your-app.jar
+```
+
+**支持的组件：**
+
+* `java.util.concurrent.ThreadPoolExecutor`
+* `java.util.concurrent.ScheduledThreadPoolExecutor`
+* `java.util.concurrent.ForkJoinPool`
+* `java.util.concurrent.CompletableFuture` (`supplyAsync`, `runAsync`)
+
+> **Note**: 对于 Spring Boot 应用，Agent 方式配合 Starter 使用效果最佳。
+
+### 方式二：手动 API (无 Agent)
+
+如果不便使用 Agent，也可以通过 API 手动包装任务：
+
+```java
+// 1. 定义 ContextKey
+static final ContextKey<String> TRACE_ID = ContextKey.of("traceId");
+
+// 2. 也是 ScopedValue 的标准用法
+FlowContext.with(TRACE_ID, "uuid-1234").run(() -> {
+    
+    // 手动包装任务以跨线程传递
+    executor.submit(FlowContext.wrap(() -> {
+        String id = FlowContext.get(TRACE_ID);
+        System.out.println("TraceId: " + id);
+    }));
+    
+});
+```
+
+---
+
+## 🧩 进阶使用
+
+### 1. 结构化并发 (Structured Concurrency)
+
+LoomFlow 扩展了 `StructuredTaskScope`，解决了原生 API 在 `fork` 时无法自动继承父线程 `ScopedValue` 的限制（注：原生 ScopedValue 仅在同一个 Thread 或通过 `ScopedValue.Carrier` 显式传递）。
+
+```java
+try (var scope = new FlowTaskScope<String>()) {
+    // fork 的子任务自动继承当前 FlowContext
+    scope.fork(() -> fetchDataA());
+    scope.fork(() -> fetchDataB());
+    
+    scope.join();
+}
+
+// 或者使用便捷 API
+List<String> results = FlowTasks.invokeAll(task1, task2);
+```
+
+### 2. Spring Boot 集成
+
+引入 `loomflow-spring-boot-starter` 后，提供如下开箱即用的能力：
+
+* **TaskExecutor 增强**: 自动装饰容器中的 `TaskExecutor` Bean。
+* **@Async 支持**: 拦截 `@Async` 注解方法，透明传递上下文。
+
+配置项 (`application.yml`):
+
+```yaml
+loomflow:
+  enabled: true
+  wrap-task-executor: true # 默认为 true
+  wrap-async: true         # 默认为 true
+```
+
+### 3. MDC 与 Trace 集成
+
+解决异步操作中 MDC 上下文丢失的问题。
+
+```java
+// 手动同步到 MDC
+FlowContext.with(TRACE_ID, "abc-123").run(() -> {
+     MdcBridge.put(TRACE_ID); // 同步
+     
+     // MDC.get("traceId") == "abc-123"
+     log.info("Business processing..."); 
+});
+```
+
+---
+
+## ⚠️ 已知限制
+
+### java.util.Timer
+
+由于 `Timer` 内部实现机制（单线程死循环处理队列，缺乏扩展点），Agent 无法在不破坏 `cancel()` 语义的前提下实现透明增强。
+
+**建议方案**：
+
+1. **推荐**：使用 `ScheduledThreadPoolExecutor` 替代 `Timer`（Agent 已完美支持）。
+2. **兼容**：如果必须使用，需手动包装并注意取消操作的对象：
+
+```java
+TimerTask wrapped = FlowContext.wrap(originTask);
+timer.schedule(wrapped, 1000);
+
+// WRONG: originTask.cancel(); // 无效
+// RIGHT: wrapped.cancel();    // 有效
+```
+
+---
+
+## 关于
+
+本项目参考了 [Alibaba/transmittable-thread-local](https://github.com/alibaba/transmittable-thread-local) 的设计思想，将其理念适配到 JDK 21+ 的虚拟线程与 ScopedValue 生态中。
+
+### License
+
+[Apache 2.0 License](LICENSE)

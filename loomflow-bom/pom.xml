@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>io.github.urzeye</groupId>
+        <artifactId>loomflow-parent</artifactId>
+        <version>${revision}</version>
+    </parent>
+
+    <artifactId>loomflow-bom</artifactId>
+    <packaging>pom</packaging>
+
+    <name>LoomFlow BOM</name>
+    <description>LoomFlow 依赖版本清单</description>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>io.github.urzeye</groupId>
+                <artifactId>loomflow-core</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.github.urzeye</groupId>
+                <artifactId>loomflow-agent</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.github.urzeye</groupId>
+                <artifactId>loomflow-integrations</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.github.urzeye</groupId>
+                <artifactId>loomflow-structured</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.github.urzeye</groupId>
+                <artifactId>loomflow-spring-boot-starter</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+</project>

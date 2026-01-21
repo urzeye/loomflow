@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>io.github.urzeye</groupId>
+        <artifactId>loomflow-parent</artifactId>
+        <version>${revision}</version>
+    </parent>
+
+    <artifactId>loomflow-structured</artifactId>
+    <packaging>jar</packaging>
+
+    <name>LoomFlow Structured Concurrency</name>
+    <description>结构化并发扩展，基于 StructuredTaskScope</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>io.github.urzeye</groupId>
+            <artifactId>loomflow-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+</project>
