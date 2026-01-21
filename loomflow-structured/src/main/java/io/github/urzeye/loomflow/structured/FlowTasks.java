@@ -143,4 +143,78 @@ public final class FlowTasks {
         List<T> results = invokeAll(tasks);
         return combiner.apply(results);
     }
+
+    /**
+     * 并行执行所有任务，等待全部完成或超时。
+     * <p>
+     * 如果超时，抛出 {@link java.util.concurrent.TimeoutException}。
+     * </p>
+     *
+     * @param timeout 超时时长
+     * @param tasks 要执行的任务
+     * @param <T>   返回类型
+     * @return 所有任务的结果列表
+     * @throws Exception 如果任何任务失败或超时
+     */
+    @SafeVarargs
+    public static <T> List<T> invokeAll(java.time.Duration timeout, Callable<T>... tasks) throws Exception {
+        try (var scope = StructuredConcurrencySupport.openFailureScope()) {
+            List<StructuredTaskScope.Subtask<T>> subtasks = new java.util.ArrayList<>();
+
+            for (Callable<T> task : tasks) {
+                subtasks.add(scope.fork(task::call));
+            }
+
+            scope.joinUntil(java.time.Instant.now().plus(timeout));
+
+            // Manual throwIfFailed check
+            for (StructuredTaskScope.Subtask<T> subtask : subtasks) {
+                if (subtask.state() == StructuredTaskScope.Subtask.State.FAILED) {
+                    Throwable ex = subtask.exception();
+                    if (ex instanceof Exception) {
+                        throw (Exception) ex;
+                    } else {
+                        throw new RuntimeException(ex);
+                    }
+                }
+            }
+
+            return subtasks.stream()
+                    .map(StructuredTaskScope.Subtask::get)
+                    .collect(Collectors.toList());
+        }
+    }
+
+    /**
+     * 并行执行所有任务，返回第一个成功的结果或超时。
+     * <p>
+     * 如果超时或所有任务都失败，抛出异常。
+     * </p>
+     *
+     * @param timeout 超时时长
+     * @param tasks 要执行的任务
+     * @param <T>   返回类型
+     * @return 第一个成功任务的结果
+     * @throws Exception 如果所有任务都失败或超时
+     */
+    @SafeVarargs
+    public static <T> T invokeAny(java.time.Duration timeout, Callable<T>... tasks) throws Exception {
+        try (var scope = StructuredConcurrencySupport.openSuccessScope()) {
+            List<StructuredTaskScope.Subtask<T>> subtasks = new java.util.ArrayList<>();
+            for (Callable<T> task : tasks) {
+                subtasks.add(scope.fork(task::call));
+            }
+
+            scope.joinUntil(java.time.Instant.now().plus(timeout));
+
+            // Manual result retrieval
+            for (StructuredTaskScope.Subtask<T> subtask : subtasks) {
+                if (subtask.state() == StructuredTaskScope.Subtask.State.SUCCESS) {
+                    return subtask.get();
+                }
+            }
+            // All failed
+            throw new java.util.concurrent.ExecutionException("No task completed successfully", null);
+        }
+    }
 }

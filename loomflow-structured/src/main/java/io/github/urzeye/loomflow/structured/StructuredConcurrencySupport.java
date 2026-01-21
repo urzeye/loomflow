@@ -41,6 +41,7 @@ final class StructuredConcurrencySupport {
     // 实例方法的方法句柄
     private static final MethodHandle FORK_MH;
     private static final MethodHandle JOIN_MH;
+    private static final MethodHandle JOIN_UNTIL_MH;
     private static final MethodHandle CLOSE_MH;
 
     // 原始 StructuredTaskScope 支持 (仅 JDK 25+)
@@ -55,6 +56,7 @@ final class StructuredConcurrencySupport {
 
         MethodHandle forkMh = null;
         MethodHandle joinMh = null;
+        MethodHandle joinUntilMh = null;
         MethodHandle closeMh = null;
 
         MethodHandle openFailTemp = null;
@@ -120,6 +122,10 @@ final class StructuredConcurrencySupport {
             joinMh = MethodHandles.publicLookup().findVirtual(scopeType, "join",
                     MethodType.methodType(scopeType));
 
+            // joinUntil(Instant) 用于超时控制
+            joinUntilMh = MethodHandles.publicLookup().findVirtual(scopeType, "joinUntil",
+                    MethodType.methodType(scopeType, java.time.Instant.class));
+
             closeMh = MethodHandles.publicLookup().findVirtual(scopeType, "close",
                     MethodType.methodType(void.class));
 
@@ -129,6 +135,7 @@ final class StructuredConcurrencySupport {
 
         FORK_MH = forkMh;
         JOIN_MH = joinMh;
+        JOIN_UNTIL_MH = joinUntilMh;
         CLOSE_MH = closeMh;
 
         OPEN_FAILURE_SCOPE_MH = openFailTemp;
@@ -171,6 +178,21 @@ final class StructuredConcurrencySupport {
                 throw e;
             } catch (Throwable e) {
                 throw new RuntimeException("Failed to join scope", e);
+            }
+        }
+
+        /**
+         * Join with a deadline (timeout support).
+         */
+        void joinUntil(java.time.Instant deadline) throws InterruptedException, java.util.concurrent.TimeoutException {
+            try {
+                JOIN_UNTIL_MH.invoke(rawScope, deadline);
+            } catch (InterruptedException | java.util.concurrent.TimeoutException e) {
+                throw e;
+            } catch (RuntimeException e) {
+                throw e;
+            } catch (Throwable e) {
+                throw new RuntimeException("Failed to joinUntil", e);
             }
         }
 

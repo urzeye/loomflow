@@ -103,6 +103,24 @@ public class FlowTaskScope<T> implements AutoCloseable {
         return this;
     }
 
+    /**
+     * 等待所有子任务完成，或在指定时间后超时。
+     * <p>
+     * 如果在截止时间前所有任务都完成，正常返回；
+     * 否则抛出 {@link java.util.concurrent.TimeoutException}。
+     * </p>
+     *
+     * @param timeout 超时时长
+     * @return this
+     * @throws InterruptedException 如果当前线程被中断
+     * @throws java.util.concurrent.TimeoutException 如果超时
+     */
+    public FlowTaskScope<T> join(java.time.Duration timeout) 
+            throws InterruptedException, java.util.concurrent.TimeoutException {
+        delegate.joinUntil(java.time.Instant.now().plus(timeout));
+        return this;
+    }
+
     @Override
     public void close() {
         delegate.close();
